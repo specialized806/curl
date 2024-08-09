@@ -1357,13 +1357,44 @@ AS_HELP_STRING([--without-ca-fallback], [Don't use the built in CA store of the 
   fi
 ])
 
+
+dnl CURL_CHECK_CA_EMBED
+dnl -------------------------------------------------
+dnl Check if a ca-bundle should be embedded
+
+AC_DEFUN([CURL_CHECK_CA_EMBED], [
+
+  AC_MSG_CHECKING([CA cert bundle path to embed])
+
+  AC_ARG_WITH(ca-embed,
+AS_HELP_STRING([--with-ca-embed=FILE],
+[Path to a file containing CA certificates (example: /etc/ca-bundle.crt)])
+AS_HELP_STRING([--without-ca-embed], [Don't embed a default CA bundle]),
+  [
+    want_ca_embed="$withval"
+    if test "x$want_ca_embed" = "xyes"; then
+      AC_MSG_ERROR([--with-ca-embed=FILE requires a path to the CA bundle])
+    fi
+  ],
+  [ want_ca_embed="unset" ])
+
+  CURL_CA_EMBED=''
+  if test "x$want_ca_embed" != "xno" -a "x$want_ca_embed" != "xunset" -a -f "$want_ca_embed"; then
+    CURL_CA_EMBED='"'$want_ca_embed'"'
+    AC_SUBST(CURL_CA_EMBED)
+    AC_MSG_RESULT([$want_ca_embed])
+  else
+    AC_MSG_RESULT([no])
+  fi
+])
+
 dnl CURL_CHECK_WIN32_LARGEFILE
 dnl -------------------------------------------------
-dnl Check if curl's WIN32 large file will be used
+dnl Check if curl's Win32 large file will be used
 
 AC_DEFUN([CURL_CHECK_WIN32_LARGEFILE], [
   AC_REQUIRE([CURL_CHECK_NATIVE_WINDOWS])dnl
-  AC_MSG_CHECKING([whether build target supports WIN32 file API])
+  AC_MSG_CHECKING([whether build target supports Win32 file API])
   curl_win32_file_api="no"
   if test "$curl_cv_native_windows" = "yes"; then
     if test x"$enable_largefile" != "xno"; then
@@ -1373,7 +1404,7 @@ AC_DEFUN([CURL_CHECK_WIN32_LARGEFILE], [
 #if !defined(_WIN32_WCE) && (defined(__MINGW32__) || defined(_MSC_VER))
           int dummy=1;
 #else
-          WIN32 large file API not supported.
+          Win32 large file API not supported.
 #endif
         ]])
       ],[
@@ -1387,7 +1418,7 @@ AC_DEFUN([CURL_CHECK_WIN32_LARGEFILE], [
 #if defined(_WIN32_WCE) || defined(__MINGW32__) || defined(_MSC_VER)
           int dummy=1;
 #else
-          WIN32 small file API not supported.
+          Win32 small file API not supported.
 #endif
         ]])
       ],[
@@ -1416,11 +1447,11 @@ AC_DEFUN([CURL_CHECK_WIN32_LARGEFILE], [
 
 dnl CURL_CHECK_WIN32_CRYPTO
 dnl -------------------------------------------------
-dnl Check if curl's WIN32 crypto lib can be used
+dnl Check if curl's Win32 crypto lib can be used
 
 AC_DEFUN([CURL_CHECK_WIN32_CRYPTO], [
   AC_REQUIRE([CURL_CHECK_NATIVE_WINDOWS])dnl
-  AC_MSG_CHECKING([whether build target supports WIN32 crypto API])
+  AC_MSG_CHECKING([whether build target supports Win32 crypto API])
   curl_win32_crypto_api="no"
   if test "$curl_cv_native_windows" = "yes"; then
     AC_COMPILE_IFELSE([

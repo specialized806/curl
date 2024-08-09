@@ -491,9 +491,12 @@ AM_CONDITIONAL([USE_CPPFLAG_CURL_STATICLIB],
 # targeting a static library and not building its shared counterpart.
 #
 
+LIBCURL_PC_CFLAGS_PRIVATE='-DCURL_STATICLIB'
+AC_SUBST(LIBCURL_PC_CFLAGS_PRIVATE)
+
 CPPFLAG_CURL_STATICLIB=
 if test "x$xc_lt_build_static_only" = 'xyes'; then
-  CPPFLAG_CURL_STATICLIB='-DCURL_STATICLIB'
+  CPPFLAG_CURL_STATICLIB="${LIBCURL_PC_CFLAGS_PRIVATE}"
 fi
 AC_SUBST([CPPFLAG_CURL_STATICLIB])
 
@@ -597,7 +600,12 @@ CURL_CHECK_WIN32_LARGEFILE
 CURL_CHECK_WIN32_CRYPTO
 
 CURL_DARWIN_CFLAGS
-CURL_SUPPORTS_BUILTIN_AVAILABLE
+
+case $host_os in
+  darwin*)
+    CURL_SUPPORTS_BUILTIN_AVAILABLE
+    ;;
+esac
 
 AM_CONDITIONAL([HAVE_WINDRES],
   [test "$curl_cv_native_windows" = "yes" && test -n "${RC}"])
@@ -1145,7 +1153,7 @@ fi
 
 if test "$HAVE_GETHOSTBYNAME" != "1"
 then
-  dnl This is for winsock systems
+  dnl This is for Winsock systems
   if test "$curl_cv_native_windows" = "yes"; then
     winsock_LIB="-lws2_32"
     if test ! -z "$winsock_LIB"; then
@@ -2083,7 +2091,10 @@ dnl **********************************************************************
 
 if test -n "$check_for_ca_bundle"; then
   CURL_CHECK_CA_BUNDLE
+  CURL_CHECK_CA_EMBED
 fi
+
+AM_CONDITIONAL(CURL_CA_EMBED_SET, test "x$CURL_CA_EMBED" != "x")
 
 dnl **********************************************************************
 dnl Check for libpsl
@@ -2103,7 +2114,7 @@ if test X"$OPT_LIBPSL" != Xno; then
   CLEANLIBS="$LIBS"
 
   case "$OPT_LIBPSL" in
-  yes)
+  yes|off)
     dnl --with-libpsl (without path) used
     CURL_CHECK_PKGCONFIG(libpsl)
 
@@ -2116,10 +2127,6 @@ if test X"$OPT_LIBPSL" != Xno; then
       LIB_PSL="-lpsl"
     fi
 
-    ;;
-  off)
-    dnl no --with-libpsl option given, just check default places
-    LIB_PSL="-lpsl"
     ;;
   *)
     dnl use the given --with-libpsl spot
@@ -2154,8 +2161,7 @@ if test X"$OPT_LIBPSL" != Xno; then
       LIBS=$CLEANLIBS
   )
 
-  if test X"$OPT_LIBPSL" != Xoff &&
-     test "$LIBPSL_ENABLED" != "1"; then
+  if test "$LIBPSL_ENABLED" != "1"; then
     AC_MSG_ERROR([libpsl libs and/or directories were not found where specified!])
   fi
 fi
@@ -2485,6 +2491,10 @@ AS_HELP_STRING([--disable-versioned-symbols], [Disable versioned symbols in shar
           versioned_symbols_flavour="MULTISSL_"
         elif test "x$OPENSSL_ENABLED" = "x1"; then
           versioned_symbols_flavour="OPENSSL_"
+        elif test "x$MBEDTLS_ENABLED" = "x1"; then
+          versioned_symbols_flavour="MBEDTLS_"
+        elif test "x$BEARSSL_ENABLED" = "x1"; then
+          versioned_symbols_flavour="BEARSSL_"
         elif test "x$GNUTLS_ENABLED" = "x1"; then
           versioned_symbols_flavour="GNUTLS_"
         elif test "x$WOLFSSL_ENABLED" = "x1"; then
@@ -2544,7 +2554,7 @@ case "$OPT_WINIDN" in
 esac
 
 if test "$want_winidn" = "yes"; then
-  dnl winidn library support has been requested
+  dnl WinIDN library support has been requested
   clean_CFLAGS="$CFLAGS"
   clean_CPPFLAGS="$CPPFLAGS"
   clean_LDFLAGS="$LDFLAGS"
@@ -2611,7 +2621,7 @@ if test "$want_winidn" = "yes"; then
 fi
 
 dnl **********************************************************************
-dnl Check for the presence of IDN libraries and headers
+dnl Check for the presence of libidn2
 dnl **********************************************************************
 
 AC_MSG_CHECKING([whether to build with libidn2])
@@ -2622,7 +2632,7 @@ AS_HELP_STRING([--without-libidn2],[Disable libidn2 usage]),
   [OPT_IDN=$withval])
 if test "x$tst_links_winidn" = "xyes"; then
   want_idn="no"
-  AC_MSG_RESULT([no (using winidn instead)])
+  AC_MSG_RESULT([no (using WinIDN instead)])
 else
   case "$OPT_IDN" in
     no)
@@ -2733,12 +2743,51 @@ if test "$want_idn" = "yes"; then
     fi
     LIBCURL_PC_REQUIRES_PRIVATE="libidn2 $LIBCURL_PC_REQUIRES_PRIVATE"
   else
-    AC_MSG_WARN([Cannot find libraries for IDN support: IDN disabled])
+    AC_MSG_WARN([Cannot find libidn2])
     CPPFLAGS="$clean_CPPFLAGS"
     LDFLAGS="$clean_LDFLAGS"
     LIBS="$clean_LIBS"
+    want_idn="no"
   fi
 fi
+
+dnl **********************************************************************
+dnl Check for the presence of AppleIDN
+dnl **********************************************************************
+
+case $host_os in
+  darwin*)
+    AC_MSG_CHECKING([whether to build with Apple IDN])
+    OPT_IDN="default"
+    AC_ARG_WITH(apple-idn,
+    AS_HELP_STRING([--with-apple-idn],[Enable AppleIDN])
+    AS_HELP_STRING([--without-apple-idn],[Disable AppleIDN]),
+      [OPT_IDN=$withval])
+    if test "x$want_idn" != "xno" -a "x$OPT_IDN" != "xyes"; then
+      want_appleidn="no"
+    else
+      case "$OPT_IDN" in
+        no)
+          dnl --without-apple-idn option used
+          AC_MSG_RESULT([no])
+          ;;
+        *)
+          AC_MSG_RESULT([yes, check])
+          AC_CHECK_LIB(icucore, uidna_openUTS46,
+          [
+            AC_CHECK_HEADERS(unicode/uidna.h,
+              curl_idn_msg="enabled (AppleIDN)"
+              AC_DEFINE(USE_APPLE_IDN, 1, [if AppleIDN])
+              AC_SUBST(USE_APPLE_IDN, [1])
+              AC_SUBST([IDN_ENABLED], [1])
+              LIBS="-licucore -liconv $LIBS"
+            )
+          ])
+          ;;
+      esac
+    fi
+    ;;
+esac
 
 dnl **********************************************************************
 dnl Check for nghttp2
@@ -3503,6 +3552,93 @@ if test X"$want_msh3" != Xno; then
 fi
 
 dnl **********************************************************************
+dnl libuv is only ever used for debug purposes
+dnl **********************************************************************
+
+OPT_LIBUV=no
+AC_ARG_WITH(libuv,
+AS_HELP_STRING([--with-libuv=PATH],[Enable libuv])
+AS_HELP_STRING([--without-libuv],[Disable libuv]),
+  [OPT_LIBUV=$withval])
+case "$OPT_LIBUV" in
+  no)
+    dnl --without-libuv option used
+    want_libuv="no"
+    ;;
+  yes)
+    dnl --with-libuv option used without path
+    want_libuv="default"
+    want_libuv_path=""
+    ;;
+  *)
+    dnl --with-libuv option used with path
+    want_libuv="yes"
+    want_libuv_path="$withval"
+    ;;
+esac
+
+if test X"$want_libuv" != Xno; then
+  if test x$want_debug != xyes; then
+    AC_MSG_ERROR([Using libuv without debug support enabled is useless])
+  fi
+
+  dnl backup the pre-libuv variables
+  CLEANLDFLAGS="$LDFLAGS"
+  CLEANCPPFLAGS="$CPPFLAGS"
+  CLEANLIBS="$LIBS"
+
+  CURL_CHECK_PKGCONFIG(libuv, $want_libuv_path)
+
+  if test "$PKGCONFIG" != "no" ; then
+    LIB_LIBUV=`CURL_EXPORT_PCDIR([$want_libuv_path])
+      $PKGCONFIG --libs-only-l libuv`
+    AC_MSG_NOTICE([-l is $LIB_LIBUV])
+
+    CPP_LIBUV=`CURL_EXPORT_PCDIR([$want_libuv_path]) dnl
+      $PKGCONFIG --cflags-only-I libuv`
+    AC_MSG_NOTICE([-I is $CPP_LIBUV])
+
+    LD_LIBUV=`CURL_EXPORT_PCDIR([$want_libuv_path])
+      $PKGCONFIG --libs-only-L libuv`
+    AC_MSG_NOTICE([-L is $LD_LIBUV])
+
+    LDFLAGS="$LDFLAGS $LD_LIBUV"
+    CPPFLAGS="$CPPFLAGS $CPP_LIBUV"
+    LIBS="$LIB_LIBUV $LIBS"
+
+    if test "x$cross_compiling" != "xyes"; then
+      DIR_LIBUV=`echo $LD_LIBUV | $SED -e 's/^-L//'`
+    fi
+    AC_CHECK_LIB(uv, uv_default_loop,
+      [
+       AC_CHECK_HEADERS(uv.h,
+          LIBUV_ENABLED=1
+          AC_DEFINE(USE_LIBUV, 1, [if libuv is in use])
+          AC_SUBST(USE_LIBUV, [1])
+          CURL_LIBRARY_PATH="$CURL_LIBRARY_PATH:$DIR_LIBUV"
+          export CURL_LIBRARY_PATH
+          AC_MSG_NOTICE([Added $DIR_LIBUV to CURL_LIBRARY_PATH])
+          LIBCURL_PC_REQUIRES_PRIVATE="$LIBCURL_PC_REQUIRES_PRIVATE libuv"
+       )
+      ],
+        dnl not found, revert back to clean variables
+        LDFLAGS=$CLEANLDFLAGS
+        CPPFLAGS=$CLEANCPPFLAGS
+        LIBS=$CLEANLIBS
+    )
+
+  else
+    dnl no libuv pkg-config found, deal with it
+    if test X"$want_libuv" != Xdefault; then
+      dnl To avoid link errors, we do not allow --with-libuv without
+      dnl a pkgconfig file
+      AC_MSG_ERROR([--with-libuv was specified but could not find libuv pkg-config file.])
+    fi
+  fi
+
+fi
+
+dnl **********************************************************************
 dnl Check for zsh completion path
 dnl **********************************************************************
 
@@ -3686,7 +3822,7 @@ AC_CHECK_TYPE([bool],[
 AC_CHECK_TYPE(sa_family_t,
    AC_DEFINE(CURL_SA_FAMILY_T, sa_family_t, [IP address type in sockaddr]),
    [
-   # The windows name?
+   # The Windows name?
    AC_CHECK_TYPE(ADDRESS_FAMILY,
      AC_DEFINE(CURL_SA_FAMILY_T, ADDRESS_FAMILY, [IP address type in sockaddr]),
      AC_DEFINE(CURL_SA_FAMILY_T, unsigned short, [IP address type in sockaddr]),
@@ -3837,13 +3973,13 @@ AC_CHECK_DECL([fseeko],
 
 CURL_CHECK_NONBLOCKING_SOCKET
 
-if test "x$BUILD_DOCS" != "x0" -o "x$USE_MANUAL" != "x0"; then
+if test "x$BUILD_DOCS" != "x0" -o "x$USE_MANUAL" != "x0" -o "x$CURL_CA_EMBED" != "x"; then
   AC_PATH_PROG( PERL, perl, ,
     $PATH:/usr/local/bin/perl:/usr/bin/:/usr/local/bin )
   AC_SUBST(PERL)
 
   if test -z "$PERL"; then
-    AC_MSG_ERROR([perl was not found, needed for docs and manual])
+    AC_MSG_ERROR([perl was not found, needed for docs, manual and CA embed])
   fi
 fi
 
@@ -3937,7 +4073,7 @@ if test "$want_pthreads" != "no"; then
       AC_CHECK_FUNC(pthread_create, [USE_THREADS_POSIX=1] )
       LIBS="$save_LIBS"
 
-      dnl on HPUX, life is more complicated...
+      dnl on HP-UX, life is more complicated...
       case $host in
       *-hp-hpux*)
          dnl it doesn't actually work without -lpthread
@@ -4859,6 +4995,9 @@ fi
 if test "x$want_curldebug" = "xyes"; then
   SUPPORT_FEATURES="$SUPPORT_FEATURES TrackMemory"
 fi
+if test "x$CURL_CA_EMBED" != "x"; then
+  SUPPORT_FEATURES="$SUPPORT_FEATURES CAcert"
+fi
 
 dnl replace spaces with newlines
 dnl sort the lines
@@ -5073,7 +5212,8 @@ AC_MSG_NOTICE([Configured to build curl/libcurl:
   Features:         ${SUPPORT_FEATURES}
 ])
 
-non13=`echo "$TLSCHOICE" | $EGREP -io 'bearssl|secure-transport'`;
+# grep -o would simplify this, but is nonportable
+[non13=`echo "$TLSCHOICE" | $AWK '{split("bearssl secure-transport", a); for (i in a) if(match(tolower($0), a[i])) print a[i];}'`]
 if test -n "$non13"; then
  for a in $non13; do
    AC_MSG_WARN([$a is enabled for TLS but it does not support TLS 1.3])

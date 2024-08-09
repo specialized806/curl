@@ -102,7 +102,7 @@ static ssize_t gtls_push(void *s, const void *buf, size_t blen)
   CURLcode result;
 
   DEBUGASSERT(data);
-  nwritten = Curl_conn_cf_send(cf->next, data, buf, blen, &result);
+  nwritten = Curl_conn_cf_send(cf->next, data, buf, blen, FALSE, &result);
   CURL_TRC_CF(data, cf, "gtls_push(len=%zu) -> %zd, err=%d",
               blen, nwritten, result);
   backend->gtls.io_result = result;
@@ -1828,6 +1828,7 @@ static CURLcode gtls_shutdown(struct Curl_cfilter *cf,
         CURL_TRC_CF(data, cf, "SSL shutdown, gnutls_bye EAGAIN");
         connssl->io_need = gnutls_record_get_direction(backend->gtls.session)?
           CURL_SSL_IO_NEED_SEND : CURL_SSL_IO_NEED_RECV;
+        backend->gtls.sent_shutdown = FALSE;
         result = CURLE_OK;
         goto out;
       }

@@ -560,7 +560,7 @@ static ssize_t ws_enc_write_head(struct Curl_easy *data,
     return -1;
   }
 
-  opcode = ws_frame_flags2op((int)flags);
+  opcode = ws_frame_flags2op((int)flags & ~CURLWS_CONT);
   if(!opcode) {
     failf(data, "WS: provided flags not recognized '%x'", flags);
     *err = CURLE_SEND_ERROR;
@@ -1019,7 +1019,7 @@ static CURLcode ws_flush(struct Curl_easy *data, struct websocket *ws,
       if(data->set.connect_only)
         result = Curl_senddata(data, out, outlen, &n);
       else {
-        result = Curl_xfer_send(data, out, outlen, &n);
+        result = Curl_xfer_send(data, out, outlen, FALSE, &n);
         if(!result && !n && outlen)
           result = CURLE_AGAIN;
       }
@@ -1088,7 +1088,7 @@ CURL_EXTERN CURLcode curl_ws_send(CURL *data, const void *buffer,
     /* raw mode sends exactly what was requested, and this is from within
        the write callback */
     if(Curl_is_in_callback(data)) {
-      result = Curl_xfer_send(data, buffer, buflen, &nwritten);
+      result = Curl_xfer_send(data, buffer, buflen, FALSE, &nwritten);
     }
     else
       result = Curl_senddata(data, buffer, buflen, &nwritten);

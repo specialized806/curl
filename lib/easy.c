@@ -605,7 +605,7 @@ static CURLcode wait_or_timeout(struct Curl_multi *multi, struct events *ev)
           int act = poll2cselect(fds[i].revents); /* convert */
           infof(multi->easyp,
                 "call curl_multi_socket_action(socket "
-                "%" CURL_FORMAT_SOCKET_T ")", fds[i].fd);
+                "%" CURL_FORMAT_SOCKET_T ")", (curl_socket_t)fds[i].fd);
           mcode = curl_multi_socket_action(multi, fds[i].fd, act,
                                            &ev->running_handles);
         }
@@ -764,7 +764,8 @@ static CURLcode easy_perform(struct Curl_easy *data, bool events)
   /* assign this after curl_multi_add_handle() */
   data->multi_easy = multi;
 
-  sigpipe_ignore(data, &pipe_st);
+  sigpipe_init(&pipe_st);
+  sigpipe_apply(data, &pipe_st);
 
   /* run the transfer */
   result = events ? easy_events(multi) : easy_transfer(multi);
@@ -1263,7 +1264,7 @@ CURLcode Curl_senddata(struct Curl_easy *data, const void *buffer,
     Curl_attach_connection(data, c);
 
   sigpipe_ignore(data, &pipe_st);
-  result = Curl_conn_send(data, FIRSTSOCKET, buffer, buflen, n);
+  result = Curl_conn_send(data, FIRSTSOCKET, buffer, buflen, FALSE, n);
   sigpipe_restore(&pipe_st);
 
   if(result && result != CURLE_AGAIN)
@@ -1334,13 +1335,30 @@ static CURLcode upkeep(struct conncache *conn_cache, void *data)
  */
 CURLcode curl_easy_upkeep(struct Curl_easy *data)
 {
+  struct conncache *conn_cache;
+
   /* Verify that we got an easy handle we can work with. */
   if(!GOOD_EASY_HANDLE(data))
     return CURLE_BAD_FUNCTION_ARGUMENT;
 
-  if(data->multi_easy) {
+  if(Curl_is_in_callback(data))
+    return CURLE_RECURSIVE_API_CALL;
+
+  /* determine the connection cache that will next be used by the easy handle.
+     if the easy handle is currently in a multi then data->state.conn_cache
+     should point to the in-use cache. */
+  DEBUGASSERT(!data->multi || data->state.conn_cache);
+  conn_cache =
+    data->state.conn_cache ?
+      data->state.conn_cache :
+    (data->share && (data->share->specifier & (1<< CURL_LOCK_DATA_CONNECT))) ?
+      &data->share->conn_cache :
+    data->multi_easy ?
+      &data->multi_easy->conn_cache : NULL;
+
+  if(conn_cache) {
     /* Use the common function to keep connections alive. */
-    return upkeep(&data->multi_easy->conn_cache, data);
+    return upkeep(conn_cache, data);
   }
   else {
     /* No connections, so just return success */

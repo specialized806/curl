@@ -124,7 +124,7 @@ static void tcpnodelay(struct Curl_easy *data, curl_socket_t sockfd)
 }
 
 #ifdef SO_NOSIGPIPE
-/* The preferred method on Mac OS X (10.2 and later) to prevent SIGPIPEs when
+/* The preferred method on macOS (10.2 and later) to prevent SIGPIPEs when
    sending data to a dead peer (instead of relying on the 4th argument to send
    being MSG_NOSIGNAL). Possibly also existing and in use on other BSD
    systems? */
@@ -235,7 +235,7 @@ tcpkeepalive(struct Curl_easy *data,
             sockfd, SOCKERRNO);
     }
 #elif defined(TCP_KEEPALIVE)
-    /* Mac OS X style */
+    /* macOS style */
     optval = curlx_sltosi(data->set.tcp_keepidle);
     KEEPALIVE_FACTOR(optval);
     if(setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPALIVE,
@@ -679,12 +679,13 @@ static CURLcode bindlocal(struct Curl_easy *data, struct connectdata *conn,
       conn->ip_version = ipver;
 
       if(h) {
+        int h_af = h->addr->ai_family;
         /* convert the resolved address, sizeof myhost >= INET_ADDRSTRLEN */
         Curl_printable_address(h->addr, myhost, sizeof(myhost));
         infof(data, "Name '%s' family %i resolved to '%s' family %i",
-              host, af, myhost, h->addr->ai_family);
-        Curl_resolv_unlock(data, h);
-        if(af != h->addr->ai_family) {
+              host, af, myhost, h_af);
+        Curl_resolv_unlink(data, &h); /* this will NULL, potential free h */
+        if(af != h_af) {
           /* bad IP version combo, signal the caller to try another address
              family if available */
           return CURLE_UNSUPPORTED_PROTOCOL;
@@ -694,7 +695,7 @@ static CURLcode bindlocal(struct Curl_easy *data, struct connectdata *conn,
       else {
         /*
          * provided dev was no interface (or interfaces are not supported
-         * e.g. solaris) no ip address and no domain we fail here
+         * e.g. Solaris) no ip address and no domain we fail here
          */
         done = -1;
       }
@@ -843,7 +844,7 @@ static bool verifyconnect(curl_socket_t sockfd, int *error)
   if(0 != getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (void *)&err, &errSize))
     err = SOCKERRNO;
 #ifdef _WIN32_WCE
-  /* Old WinCE versions do not support SO_ERROR */
+  /* Old Windows CE versions do not support SO_ERROR */
   if(WSAENOPROTOOPT == err) {
     SET_SOCKERRNO(0);
     err = 0;
@@ -1449,13 +1450,15 @@ static void win_update_sndbuf_size(struct cf_socket_ctx *ctx)
 #endif /* USE_WINSOCK */
 
 static ssize_t cf_socket_send(struct Curl_cfilter *cf, struct Curl_easy *data,
-                              const void *buf, size_t len, CURLcode *err)
+                              const void *buf, size_t len, bool eos,
+                              CURLcode *err)
 {
   struct cf_socket_ctx *ctx = cf->ctx;
   curl_socket_t fdsave;
   ssize_t nwritten;
   size_t orig_len = len;
 
+  (void)eos; /* unused */
   *err = CURLE_OK;
   fdsave = cf->conn->sock[cf->sockindex];
   cf->conn->sock[cf->sockindex] = ctx->sock;
@@ -1464,7 +1467,7 @@ static ssize_t cf_socket_send(struct Curl_cfilter *cf, struct Curl_easy *data,
   /* simulate network blocking/partial writes */
   if(ctx->wblock_percent > 0) {
     unsigned char c = 0;
-    Curl_rand(data, &c, 1);
+    Curl_rand_bytes(data, FALSE, &c, 1);
     if(c >= ((100-ctx->wblock_percent)*256/100)) {
       CURL_TRC_CF(data, cf, "send(len=%zu) SIMULATE EWOULDBLOCK", orig_len);
       *err = CURLE_AGAIN;

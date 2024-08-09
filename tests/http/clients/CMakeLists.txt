@@ -21,6 +21,25 @@
 # SPDX-License-Identifier: curl
 #
 ###########################################################################
-# Loads 'TESTCASES' from for the 'make show' target in runtests.pl
+
+# Get 'check_PROGRAMS' variable
 transform_makefile_inc("Makefile.inc" "${CMAKE_CURRENT_BINARY_DIR}/Makefile.inc.cmake")
 include("${CMAKE_CURRENT_BINARY_DIR}/Makefile.inc.cmake")
+
+foreach(_test_name IN LISTS check_PROGRAMS)
+  set(_test_target "curl-test-client-${_test_name}")
+  add_executable(${_test_target} "${_test_name}.c")
+  add_dependencies(testdeps ${_test_target})
+  target_include_directories(${_test_target} PRIVATE
+    "${CURL_BINARY_DIR}/lib"  # for "curl_config.h"
+    "${CURL_SOURCE_DIR}/lib"  # for "curl_setup.h"
+  )
+  target_link_libraries(${_test_target} ${LIB_SELECTED} ${CURL_LIBS})
+  target_compile_definitions(${_test_target} PRIVATE "CURL_NO_OLDIES")
+  if(LIB_SELECTED STREQUAL LIB_STATIC AND WIN32)
+    set_property(TARGET ${_test_target} APPEND PROPERTY COMPILE_DEFINITIONS "CURL_STATICLIB")
+  endif()
+  set_target_properties(${_test_target} PROPERTIES
+    OUTPUT_NAME "${_test_name}" UNITY_BUILD OFF
+    PROJECT_LABEL "Test client ${_test_target}")
+endforeach()

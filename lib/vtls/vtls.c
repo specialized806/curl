@@ -138,6 +138,9 @@ static const struct alpn_spec ALPN_SPEC_H11 = {
   { ALPN_HTTP_1_1 }, 1
 };
 #ifdef USE_HTTP2
+static const struct alpn_spec ALPN_SPEC_H2 = {
+  { ALPN_H2 }, 1
+};
 static const struct alpn_spec ALPN_SPEC_H2_H11 = {
   { ALPN_H2, ALPN_HTTP_1_1 }, 2
 };
@@ -148,6 +151,8 @@ static const struct alpn_spec *alpn_get_spec(int httpwant, bool use_alpn)
   if(!use_alpn)
     return NULL;
 #ifdef USE_HTTP2
+  if(httpwant == CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE)
+    return &ALPN_SPEC_H2;
   if(httpwant >= CURL_HTTP_VERSION_2)
     return &ALPN_SPEC_H2_H11;
 #else
@@ -413,23 +418,6 @@ int Curl_ssl_init(void)
   return Curl_ssl->init();
 }
 
-#if defined(CURL_WITH_MULTI_SSL)
-static const struct Curl_ssl Curl_ssl_multi;
-#endif
-
-/* Global cleanup */
-void Curl_ssl_cleanup(void)
-{
-  if(init_ssl) {
-    /* only cleanup if we did a previous init */
-    Curl_ssl->cleanup();
-#if defined(CURL_WITH_MULTI_SSL)
-    Curl_ssl = &Curl_ssl_multi;
-#endif
-    init_ssl = FALSE;
-  }
-}
-
 static bool ssl_prefs_check(struct Curl_easy *data)
 {
   /* check for CURLOPT_SSLVERSION invalid parameter value */
@@ -591,10 +579,9 @@ bool Curl_ssl_getsessionid(struct Curl_cfilter *cf,
     }
   }
 
-  DEBUGF(infof(data, "%s Session ID in cache for %s %s://%s:%d",
-               no_match? "Did not find": "Found",
-               Curl_ssl_cf_is_proxy(cf) ? "proxy" : "host",
-               cf->conn->handler->scheme, peer->hostname, peer->port));
+  CURL_TRC_CF(data, cf, "%s cached session ID for %s://%s:%d",
+              no_match? "No": "Found",
+              cf->conn->handler->scheme, peer->hostname, peer->port);
   return no_match;
 }
 
@@ -905,7 +892,7 @@ CURLcode Curl_ssl_push_certinfo_len(struct Curl_easy *data,
   CURLcode result = CURLE_OK;
   struct dynbuf build;
 
-  Curl_dyn_init(&build, 10000);
+  Curl_dyn_init(&build, CURL_X509_STR_MAX);
 
   if(Curl_dyn_add(&build, label) ||
      Curl_dyn_addn(&build, ":", 1) ||
@@ -1404,6 +1391,19 @@ static const struct Curl_ssl *available_backends[] = {
   NULL
 };
 
+/* Global cleanup */
+void Curl_ssl_cleanup(void)
+{
+  if(init_ssl) {
+    /* only cleanup if we did a previous init */
+    Curl_ssl->cleanup();
+#if defined(CURL_WITH_MULTI_SSL)
+    Curl_ssl = &Curl_ssl_multi;
+#endif
+    init_ssl = FALSE;
+  }
+}
+
 static size_t multissl_version(char *buffer, size_t size)
 {
   static const struct Curl_ssl *selected;
@@ -1571,69 +1571,70 @@ CURLcode Curl_ssl_peer_init(struct ssl_peer *peer, struct Curl_cfilter *cf,
                             int transport)
 {
   const char *ehostname, *edispname;
-  int eport;
+  CURLcode result = CURLE_OUT_OF_MEMORY;
 
+  /* We expect a clean struct, e.g. called only ONCE */
+  DEBUGASSERT(peer);
+  DEBUGASSERT(!peer->hostname);
+  DEBUGASSERT(!peer->dispname);
+  DEBUGASSERT(!peer->sni);
   /* We need the hostname for SNI negotiation. Once handshaked, this remains
    * the SNI hostname for the TLS connection. When the connection is reused,
    * the settings in cf->conn might change. We keep a copy of the hostname we
    * use for SNI.
    */
+  peer->transport = transport;
 #ifndef CURL_DISABLE_PROXY
   if(Curl_ssl_cf_is_proxy(cf)) {
     ehostname = cf->conn->http_proxy.host.name;
     edispname = cf->conn->http_proxy.host.dispname;
-    eport = cf->conn->http_proxy.port;
+    peer->port = cf->conn->http_proxy.port;
   }
   else
 #endif
   {
     ehostname = cf->conn->host.name;
     edispname = cf->conn->host.dispname;
-    eport = cf->conn->remote_port;
+    peer->port = cf->conn->remote_port;
   }
 
-  /* change if ehostname changed */
-  DEBUGASSERT(!ehostname || ehostname[0]);
-  if(ehostname && (!peer->hostname
-                   || strcmp(ehostname, peer->hostname))) {
+  /* hostname MUST exist and not be empty */
+  if(!ehostname || !ehostname[0]) {
+    result = CURLE_FAILED_INIT;
+    goto out;
+  }
+
+  peer->hostname = strdup(ehostname);
+  if(!peer->hostname)
+    goto out;
+  if(!edispname || !strcmp(ehostname, edispname))
+    peer->dispname = peer->hostname;
+  else {
+    peer->dispname = strdup(edispname);
+    if(!peer->dispname)
+      goto out;
+  }
+  peer->type = get_peer_type(peer->hostname);
+  if(peer->type == CURL_SSL_PEER_DNS) {
+    /* not an IP address, normalize according to RCC 6066 ch. 3,
+     * max len of SNI is 2^16-1, no trailing dot */
+    size_t len = strlen(peer->hostname);
+    if(len && (peer->hostname[len-1] == '.'))
+      len--;
+    if(len < USHRT_MAX) {
+      peer->sni = calloc(1, len + 1);
+      if(!peer->sni)
+        goto out;
+      Curl_strntolower(peer->sni, peer->hostname, len);
+      peer->sni[len] = 0;
+    }
+  }
+  result = CURLE_OK;
+
+out:
+  if(result)
     Curl_ssl_peer_cleanup(peer);
-    peer->hostname = strdup(ehostname);
-    if(!peer->hostname) {
-      Curl_ssl_peer_cleanup(peer);
-      return CURLE_OUT_OF_MEMORY;
-    }
-    if(!edispname || !strcmp(ehostname, edispname))
-      peer->dispname = peer->hostname;
-    else {
-      peer->dispname = strdup(edispname);
-      if(!peer->dispname) {
-        Curl_ssl_peer_cleanup(peer);
-        return CURLE_OUT_OF_MEMORY;
-      }
-    }
-
-    peer->type = get_peer_type(peer->hostname);
-    if(peer->type == CURL_SSL_PEER_DNS && peer->hostname[0]) {
-      /* not an IP address, normalize according to RCC 6066 ch. 3,
-       * max len of SNI is 2^16-1, no trailing dot */
-      size_t len = strlen(peer->hostname);
-      if(len && (peer->hostname[len-1] == '.'))
-        len--;
-      if(len < USHRT_MAX) {
-        peer->sni = calloc(1, len + 1);
-        if(!peer->sni) {
-          Curl_ssl_peer_cleanup(peer);
-          return CURLE_OUT_OF_MEMORY;
-        }
-        Curl_strntolower(peer->sni, peer->hostname, len);
-        peer->sni[len] = 0;
-      }
-    }
-
-  }
-  peer->port = eport;
-  peer->transport = transport;
-  return CURLE_OK;
+  return result;
 }
 
 static void ssl_cf_destroy(struct Curl_cfilter *cf, struct Curl_easy *data)
@@ -1672,22 +1673,29 @@ static CURLcode ssl_cf_connect(struct Curl_cfilter *cf,
     return CURLE_OK;
   }
 
+  if(!cf->next) {
+    *done = FALSE;
+    return CURLE_FAILED_INIT;
+  }
+
+  if(!cf->next->connected) {
+    result = cf->next->cft->do_connect(cf->next, data, blocking, done);
+    if(result || !*done)
+      return result;
+  }
+
   CF_DATA_SAVE(save, cf, data);
   CURL_TRC_CF(data, cf, "cf_connect()");
-  (void)connssl;
   DEBUGASSERT(data->conn);
   DEBUGASSERT(data->conn == cf->conn);
   DEBUGASSERT(connssl);
-  DEBUGASSERT(cf->conn->host.name);
-
-  result = cf->next->cft->do_connect(cf->next, data, blocking, done);
-  if(result || !*done)
-    goto out;
 
   *done = FALSE;
-  result = Curl_ssl_peer_init(&connssl->peer, cf, TRNSPRT_TCP);
-  if(result)
-    goto out;
+  if(!connssl->peer.hostname) {
+    result = Curl_ssl_peer_init(&connssl->peer, cf, TRNSPRT_TCP);
+    if(result)
+      goto out;
+  }
 
   if(blocking) {
     result = ssl_connect(cf, data);
@@ -1725,11 +1733,12 @@ static bool ssl_cf_data_pending(struct Curl_cfilter *cf,
 
 static ssize_t ssl_cf_send(struct Curl_cfilter *cf,
                            struct Curl_easy *data, const void *buf, size_t len,
-                           CURLcode *err)
+                           bool eos, CURLcode *err)
 {
   struct cf_call_data save;
   ssize_t nwritten;
 
+  (void)eos; /* unused */
   CF_DATA_SAVE(save, cf, data);
   *err = CURLE_OK;
   nwritten = Curl_ssl->send_plain(cf, data, buf, len, err);

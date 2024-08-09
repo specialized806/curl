@@ -46,11 +46,11 @@
 # fnmatch differences are just too common to make testing them sensible
 1307
 1316
-# test 1510 causes problems on the CI on github
+# test 1510 causes problems on the CI on GitHub
 # example: https://travis-ci.org/curl/curl/builds/81633600
 1510
 1512
-# test 1801 causes problems on Mac OS X and github
+# test 1801 causes problems on macOS and GitHub
 # https://github.com/curl/curl/issues/380
 1801
 # test 2086 causes issues on Windows only
@@ -85,27 +85,6 @@
 2307
 %endif
 2043
-# The CRL test (313) doesn't work with rustls because rustls doesn't support
-# CRLs.
-# Tests that rely on connecting to an IP address over TLS don't work because
-# rustls doesn't support IP address certificates yet. That's the 400 series of
-# tests listed here, plus 1112 and 1272
-%if rustls
-313
-400
-401
-403
-404
-406
-407
-408
-409
-987
-988
-989
-1112
-1272
-%endif
 # The CRL test doesn't work with wolfSSL
 %if wolfssl
 313
@@ -113,4 +92,7 @@
 # The CRL test doesn't work with BearSSL
 %if bearssl
 313
+%endif
+%if WinIDN
+165
 %endif

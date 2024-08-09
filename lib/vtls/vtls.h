@@ -39,6 +39,7 @@ struct Curl_ssl_session;
 #define SSLSUPP_CAINFO_BLOB  (1<<6)
 #define SSLSUPP_ECH          (1<<7)
 #define SSLSUPP_CA_CACHE     (1<<8)
+#define SSLSUPP_CIPHER_LIST  (1<<9) /* supports TLS 1.0-1.2 ciphersuites */
 
 #define ALPN_ACCEPTED "ALPN: server accepted "
 
@@ -131,6 +132,7 @@ CURLcode Curl_ssl_initsessions(struct Curl_easy *, size_t);
 void Curl_ssl_version(char *buffer, size_t size);
 
 /* Certificate information list handling. */
+#define CURL_X509_STR_MAX  100000
 
 void Curl_ssl_free_certinfo(struct Curl_easy *data);
 CURLcode Curl_ssl_init_certinfo(struct Curl_easy *data, int num);

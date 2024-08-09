@@ -231,7 +231,7 @@
 /*
  * Whether SSL_CTX_set1_curves_list is available.
  * OpenSSL: supported since 1.0.2, see
- *   https://www.openssl.org/docs/manmaster/man3/SSL_CTX_set1_groups.html
+ *   https://docs.openssl.org/master/man3/SSL_CTX_set1_curves/
  * BoringSSL: supported since 5fd1807d95f7 (committed 2016-09-30)
  * LibreSSL: since 2.5.3 (April 12, 2017)
  */
@@ -723,7 +723,8 @@ static int ossl_bio_cf_out_write(BIO *bio, const char *buf, int blen)
   if(blen < 0)
     return 0;
 
-  nwritten = Curl_conn_cf_send(cf->next, data, buf, (size_t)blen, &result);
+  nwritten = Curl_conn_cf_send(cf->next, data, buf, (size_t)blen, FALSE,
+                               &result);
   CURL_TRC_CF(data, cf, "ossl_bio_cf_out_write(len=%d) -> %d, err=%d",
               blen, (int)nwritten, result);
   BIO_clear_retry_flags(bio);
@@ -1878,7 +1879,7 @@ static CURLcode ossl_shutdown(struct Curl_cfilter *cf,
   struct ossl_ctx *octx = (struct ossl_ctx *)connssl->backend;
   CURLcode result = CURLE_OK;
   char buf[1024];
-  int nread, err;
+  int nread = -1, err;
   unsigned long sslerr;
   size_t i;
 
@@ -1919,26 +1920,32 @@ static CURLcode ossl_shutdown(struct Curl_cfilter *cf,
         goto out;
       }
     }
-    if(send_shutdown && SSL_shutdown(octx->ssl) == 1) {
-      CURL_TRC_CF(data, cf, "SSL shutdown finished");
-      *done = TRUE;
-      goto out;
-    }
   }
 
   /* SSL should now have started the shutdown from our side. Since it
    * was not complete, we are lacking the close notify from the server. */
+  if(send_shutdown) {
+    ERR_clear_error();
+    if(SSL_shutdown(octx->ssl) == 1) {
+      CURL_TRC_CF(data, cf, "SSL shutdown finished");
+      *done = TRUE;
+      goto out;
+    }
+    if(SSL_ERROR_WANT_WRITE == SSL_get_error(octx->ssl, nread)) {
+      CURL_TRC_CF(data, cf, "SSL shutdown still wants to send");
+      connssl->io_need = CURL_SSL_IO_NEED_SEND;
+      goto out;
+    }
+    /* Having sent the close notify, we use SSL_read() to get the
+     * missing close notify from the server. */
+  }
+
   for(i = 0; i < 10; ++i) {
     ERR_clear_error();
     nread = SSL_read(octx->ssl, buf, (int)sizeof(buf));
     CURL_TRC_CF(data, cf, "SSL shutdown read -> %d", nread);
     if(nread <= 0)
       break;
-  }
-  if(SSL_get_shutdown(octx->ssl) & SSL_RECEIVED_SHUTDOWN) {
-    CURL_TRC_CF(data, cf, "SSL shutdown received, finished");
-    *done = TRUE;
-    goto out;
   }
   err = SSL_get_error(octx->ssl, nread);
   switch(err) {
@@ -3244,7 +3251,8 @@ static CURLcode populate_x509_store(struct Curl_cfilter *cf,
        problems with server-sent legacy intermediates. Newer versions of
        OpenSSL do alternate chain checking by default but we do not know how to
        determine that in a reliable manner.
-       https://rt.openssl.org/Ticket/Display.html?id=3621&user=guest&pass=guest
+       https://web.archive.org/web/20190422050538/
+       rt.openssl.org/Ticket/Display.html?id=3621
     */
 #if defined(X509_V_FLAG_TRUSTED_FIRST)
     X509_STORE_set_flags(store, X509_V_FLAG_TRUSTED_FIRST);
@@ -3567,12 +3575,12 @@ CURLcode Curl_ossl_ctx_init(struct ossl_ctx *octx,
      CVE-2010-4180 when using previous OpenSSL versions we no longer enable
      this option regardless of OpenSSL version and SSL_OP_ALL definition.
 
-     OpenSSL added a work-around for a SSL 3.0/TLS 1.0 CBC vulnerability
-     (https://www.openssl.org/~bodo/tls-cbc.txt). In 0.9.6e they added a bit to
-     SSL_OP_ALL that _disables_ that work-around despite the fact that
-     SSL_OP_ALL is documented to do "rather harmless" workarounds. In order to
-     keep the secure work-around, the SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS bit
-     must not be set.
+     OpenSSL added a work-around for a SSL 3.0/TLS 1.0 CBC vulnerability:
+     https://web.archive.org/web/20240114184648/openssl.org/~bodo/tls-cbc.txt.
+     In 0.9.6e they added a bit to SSL_OP_ALL that _disables_ that work-around
+     despite the fact that SSL_OP_ALL is documented to do "rather harmless"
+     workarounds. In order to keep the secure work-around, the
+     SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS bit must not be set.
   */
 
   ctx_options = SSL_OP_ALL;
@@ -3629,6 +3637,11 @@ CURLcode Curl_ossl_ctx_init(struct ossl_ctx *octx,
   }
 
   SSL_CTX_set_options(octx->ssl_ctx, ctx_options);
+
+#ifdef SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER
+  /* We do retry writes sometimes from another buffer address */
+  SSL_CTX_set_mode(octx->ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+#endif
 
 #ifdef HAS_ALPN
   if(alpn && alpn_len) {
@@ -3896,7 +3909,7 @@ CURLcode Curl_ossl_ctx_init(struct ossl_ctx *octx,
           if(data->set.tls_ech & CURLECH_HARD)
             return CURLE_SSL_CONNECT_ERROR;
         }
-        Curl_resolv_unlock(data, dns);
+        Curl_resolv_unlink(data, &dns);
       }
     }
 # ifdef OPENSSL_IS_BORINGSSL
@@ -4109,30 +4122,34 @@ static CURLcode ossl_connect_step2(struct Curl_cfilter *cf,
      <0 is "handshake was not successful, because a fatal error occurred" */
   if(1 != err) {
     int detail = SSL_get_error(octx->ssl, err);
+    CURL_TRC_CF(data, cf, "SSL_connect() -> err=%d, detail=%d", err, detail);
 
     if(SSL_ERROR_WANT_READ == detail) {
+      CURL_TRC_CF(data, cf, "SSL_connect() -> want recv");
       connssl->io_need = CURL_SSL_IO_NEED_RECV;
       return CURLE_OK;
     }
     if(SSL_ERROR_WANT_WRITE == detail) {
+      CURL_TRC_CF(data, cf, "SSL_connect() -> want send");
       connssl->io_need = CURL_SSL_IO_NEED_SEND;
       return CURLE_OK;
     }
 #ifdef SSL_ERROR_WANT_ASYNC
     if(SSL_ERROR_WANT_ASYNC == detail) {
+      CURL_TRC_CF(data, cf, "SSL_connect() -> want async");
+      connssl->io_need = CURL_SSL_IO_NEED_RECV;
       connssl->connecting_state = ssl_connect_2;
       return CURLE_OK;
     }
 #endif
 #ifdef SSL_ERROR_WANT_RETRY_VERIFY
     if(SSL_ERROR_WANT_RETRY_VERIFY == detail) {
+      CURL_TRC_CF(data, cf, "SSL_connect() -> want retry_verify");
+      connssl->io_need = CURL_SSL_IO_NEED_RECV;
       connssl->connecting_state = ssl_connect_2;
       return CURLE_OK;
     }
 #endif
-    if(octx->io_result == CURLE_AGAIN) {
-      return CURLE_OK;
-    }
     else {
       /* untreated error */
       sslerr_t errdetail;
@@ -4363,7 +4380,7 @@ static CURLcode ossl_pkp_pin_peer_pubkey(struct Curl_easy *data, X509* cert,
     if(!buff1)
       break; /* failed */
 
-    /* https://www.openssl.org/docs/crypto/d2i_X509.html */
+    /* https://docs.openssl.org/master/man3/d2i_X509/ */
     len2 = i2d_X509_PUBKEY(X509_get_X509_PUBKEY(cert), &temp);
 
     /*
@@ -4720,6 +4737,7 @@ static CURLcode ossl_connect_common(struct Curl_cfilter *cf,
   curl_socket_t sockfd = Curl_conn_cf_get_socket(cf, data);
   int what;
 
+  connssl->io_need = CURL_SSL_IO_NEED_NONE;
   /* check if the connection has already been established */
   if(ssl_connection_complete == connssl->state) {
     *done = TRUE;
@@ -4866,6 +4884,7 @@ static ssize_t ossl_send(struct Curl_cfilter *cf,
 
   ERR_clear_error();
 
+  connssl->io_need = CURL_SSL_IO_NEED_NONE;
   memlen = (len > (size_t)INT_MAX) ? INT_MAX : (int)len;
   rc = SSL_write(octx->ssl, mem, memlen);
 
@@ -4874,10 +4893,11 @@ static ssize_t ossl_send(struct Curl_cfilter *cf,
 
     switch(err) {
     case SSL_ERROR_WANT_READ:
+      connssl->io_need = CURL_SSL_IO_NEED_RECV;
+      *curlcode = CURLE_AGAIN;
+      rc = -1;
+      goto out;
     case SSL_ERROR_WANT_WRITE:
-      /* The operation did not complete; the same TLS/SSL I/O function
-         should be called again later. This is basically an EWOULDBLOCK
-         equivalent. */
       *curlcode = CURLE_AGAIN;
       rc = -1;
       goto out;
@@ -4949,6 +4969,7 @@ static ssize_t ossl_recv(struct Curl_cfilter *cf,
 
   ERR_clear_error();
 
+  connssl->io_need = CURL_SSL_IO_NEED_NONE;
   buffsize = (buffersize > (size_t)INT_MAX) ? INT_MAX : (int)buffersize;
   nread = (ssize_t)SSL_read(octx->ssl, buf, buffsize);
 
@@ -4967,15 +4988,18 @@ static ssize_t ossl_recv(struct Curl_cfilter *cf,
         connclose(conn, "TLS close_notify");
       break;
     case SSL_ERROR_WANT_READ:
+      *curlcode = CURLE_AGAIN;
+      nread = -1;
+      goto out;
     case SSL_ERROR_WANT_WRITE:
-      /* there is data pending, re-invoke SSL_read() */
+      connssl->io_need = CURL_SSL_IO_NEED_SEND;
       *curlcode = CURLE_AGAIN;
       nread = -1;
       goto out;
     default:
       /* openssl/ssl.h for SSL_ERROR_SYSCALL says "look at error stack/return
          value/errno" */
-      /* https://www.openssl.org/docs/crypto/ERR_get_error.html */
+      /* https://docs.openssl.org/master/man3/ERR_get_error/ */
       if(octx->io_result == CURLE_AGAIN) {
         *curlcode = CURLE_AGAIN;
         nread = -1;
@@ -5188,7 +5212,8 @@ const struct Curl_ssl Curl_ssl_openssl = {
   SSLSUPP_ECH |
 #endif
   SSLSUPP_CA_CACHE |
-  SSLSUPP_HTTPS_PROXY,
+  SSLSUPP_HTTPS_PROXY |
+  SSLSUPP_CIPHER_LIST,
 
   sizeof(struct ossl_ctx),
 

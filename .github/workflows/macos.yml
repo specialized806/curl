@@ -13,7 +13,6 @@ on:
       - '**/*.md'
       - '.azure-pipelines.yml'
       - '.circleci/**'
-      - '.cirrus.yml'
       - 'appveyor.*'
       - 'packages/**'
       - 'plan9/**'
@@ -26,7 +25,6 @@ on:
       - '**/*.md'
       - '.azure-pipelines.yml'
       - '.circleci/**'
-      - '.cirrus.yml'
       - 'appveyor.*'
       - 'packages/**'
       - 'plan9/**'
@@ -82,9 +80,9 @@ jobs:
             compiler: clang
             configure: --enable-debug --without-ssl --enable-websockets
             macos-version-min: '10.9'
-          - name: '!ssl libssh2'
+          - name: '!ssl libssh2 AppleIDN'
             compiler: clang
-            configure: --enable-debug --with-libssh2=$(brew --prefix libssh2) --without-ssl --enable-websockets
+            configure: --enable-debug --with-libssh2=$(brew --prefix libssh2) --without-ssl --with-apple-idn --enable-websockets
             macos-version-min: '10.9'
           - name: 'OpenSSL libssh c-ares'
             compiler: clang
@@ -191,9 +189,10 @@ jobs:
             grep -h -r -E -o '.+[0-9.]+\.sdk/' "$(dirname "$("${CC}" -print-libgcc-file-name)")/include-fixed" | sed -E 's/^\t+//g' | tr -d '"' | sort -u || true
           which "${CC}"; "${CC}" --version || true
           xcodebuild -version || true
-          xcrun -sdk macosx --show-sdk-path 2>/dev/null || true
+          xcrun --sdk macosx --show-sdk-path 2>/dev/null || true
+          xcrun --sdk macosx --show-sdk-version || true
           echo '::group::macros predefined'; "${CC}" -dM -E - < /dev/null | sort || true; echo '::endgroup::'
-          echo '::group::brew packages preinstalled'; ls -l "$(brew --prefix)/opt"; echo '::endgroup::'
+          echo '::group::brew packages installed'; ls -l "$(brew --prefix)/opt"; echo '::endgroup::'
 
       - name: 'autoreconf'
         run: autoreconf -fi
@@ -217,8 +216,8 @@ jobs:
             CC+=" --target=$(uname -m)-apple-darwin"
           fi
           if [ '${{ matrix.compiler }}' != 'clang' ]; then
-            options+=" --with-sysroot=$(xcrun -sdk macosx --show-sdk-path 2>/dev/null)"
-            CFLAGS+=" --sysroot=$(xcrun -sdk macosx --show-sdk-path 2>/dev/null)"
+            options+=" --with-sysroot=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
+            CFLAGS+=" --sysroot=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
           fi
           mkdir bld && cd bld && ../configure --enable-warnings --enable-werror \
             --disable-dependency-tracking \
@@ -278,24 +277,23 @@ jobs:
             install: gsasl
             generate: -DOPENSSL_ROOT_DIR=$(brew --prefix openssl) -DCURL_USE_GSASL=ON -DUSE_APPLE_IDN=ON -DENABLE_WEBSOCKETS=ON
             macos-version-min: '10.9'
-            tflags: '~1034 ~1035'  # AppleIDN issues: https://github.com/curl/curl/issues/14176
           - name: 'OpenSSL +static'
             generate: -DOPENSSL_ROOT_DIR=$(brew --prefix openssl) -DBUILD_STATIC_LIBS=ON
             macos-version-min: '10.9'
           - name: 'SecureTransport ws debug+'
             generate: -DCURL_USE_SECTRANSP=ON -DENABLE_WEBSOCKETS=ON -DENABLE_DEBUG=ON -DENABLE_CURLDEBUG=ON
             macos-version-min: '10.8'
-          - name: 'LibreSSL !ldap'
-            install: libressl
-            generate: -DOPENSSL_ROOT_DIR=$(brew --prefix libressl) -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_LDAPS=ON -DBUILD_EXAMPLES=ON
+          - name: 'LibreSSL !ldap heimdal'
+            install: libressl heimdal
+            generate: -DOPENSSL_ROOT_DIR=$(brew --prefix libressl) -DCURL_USE_GSSAPI=ON -DGSS_ROOT_DIR=$(brew --prefix heimdal) -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_LDAPS=ON -DBUILD_EXAMPLES=ON
             macos-version-min: '10.15'
           - name: 'wolfSSL !ldap'
             install: wolfssl
             generate: -DCURL_USE_WOLFSSL=ON -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_LDAPS=ON
             macos-version-min: '10.15'
-          - name: 'GnuTLS !ldap'
-            install: gnutls
-            generate: -DCURL_USE_GNUTLS=ON -DCURL_USE_OPENSSL=OFF -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_LDAPS=ON -DCMAKE_SHARED_LINKER_FLAGS=-L$(brew --prefix nettle)/lib -DCMAKE_EXE_LINKER_FLAGS=-L$(brew --prefix nettle)/lib
+          - name: 'GnuTLS !ldap krb5'
+            install: gnutls nettle krb5
+            generate: -DCURL_USE_GNUTLS=ON -DCURL_USE_OPENSSL=OFF -DCURL_USE_GSSAPI=ON -DGSS_ROOT_DIR=$(brew --prefix krb5) -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_LDAPS=ON
             macos-version-min: '10.15'
         exclude:
           - { compiler: llvm@15, build: { macos-version-min: '10.15' } }
@@ -326,9 +324,10 @@ jobs:
             grep -h -r -E -o '.+[0-9.]+\.sdk/' "$(dirname "$("${CC}" -print-libgcc-file-name)")/include-fixed" | sed -E 's/^\t+//g' | tr -d '"' | sort -u || true
           which "${CC}"; "${CC}" --version || true
           xcodebuild -version || true
-          xcrun -sdk macosx --show-sdk-path 2>/dev/null || true
+          xcrun --sdk macosx --show-sdk-path 2>/dev/null || true
+          xcrun --sdk macosx --show-sdk-version || true
           echo '::group::macros predefined'; "${CC}" -dM -E - < /dev/null | sort || true; echo '::endgroup::'
-          echo '::group::brew packages preinstalled'; ls -l "$(brew --prefix)/opt"; echo '::endgroup::'
+          echo '::group::brew packages installed'; ls -l "$(brew --prefix)/opt"; echo '::endgroup::'
 
       - name: 'cmake configure'
         run: |
@@ -346,7 +345,6 @@ jobs:
           cmake -B bld -DCMAKE_UNITY_BUILD=ON -DCURL_WERROR=ON \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ matrix.build.macos-version-min }} \
             "-DCMAKE_C_COMPILER_TARGET=$(uname -m | sed 's/arm64/aarch64/')-apple-darwin$(uname -r)" \
-            -DUSE_NGHTTP2=ON \
             ${{ matrix.build.generate }}
 
       - name: 'configure log'
@@ -464,7 +462,8 @@ jobs:
             grep -h -r -E -o '.+[0-9.]+\.sdk/' "$(dirname "$("${CC}" -print-libgcc-file-name)")/include-fixed" | sed -E 's/^\t+//g' | tr -d '"' | sort -u || true
           which "${CC}"; "${CC}" --version || true
           xcodebuild -version || true
-          xcrun -sdk macosx --show-sdk-path 2>/dev/null || true
+          xcrun --sdk macosx --show-sdk-path 2>/dev/null || true
+          xcrun --sdk macosx --show-sdk-version || true
           echo '::group::macros predefined'; "${CC}" -dM -E - < /dev/null | sort || true; echo '::endgroup::'
           echo '::group::brew packages preinstalled'; ls -l "$(brew --prefix)/opt"; echo '::endgroup::'
 
@@ -578,8 +577,8 @@ jobs:
               CC+=" --target=$(uname -m)-apple-darwin"
             fi
             if [ '${{ matrix.compiler }}' != 'clang' ]; then
-              options+=" --with-sysroot=$(xcrun -sdk macosx --show-sdk-path 2>/dev/null)"
-              CFLAGS+=" --sysroot=$(xcrun -sdk macosx --show-sdk-path 2>/dev/null)"
+              options+=" --with-sysroot=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
+              CFLAGS+=" --sysroot=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
             fi
             [ '${{ matrix.config }}' = 'OpenSSL' ]         && options+=" --with-openssl=$(brew --prefix openssl)"
             [ '${{ matrix.config }}' = 'SecureTransport' ] && options+=' --with-secure-transport'
@@ -589,6 +588,7 @@ jobs:
               --disable-dependency-tracking \
               --disable-docs --disable-manual \
               --without-nghttp2 --without-libidn2 \
+              --without-libpsl \
               ${options}
           else
             [ '${{ matrix.config }}' = 'OpenSSL' ]         && options+=' -DCURL_USE_OPENSSL=ON'
@@ -599,7 +599,7 @@ jobs:
               "-DCMAKE_IGNORE_PREFIX_PATH=$(brew --prefix)" \
               "-DCMAKE_C_COMPILER_TARGET=$(uname -m | sed 's/arm64/aarch64/')-apple-darwin$(uname -r)" \
               -DBUILD_LIBCURL_DOCS=OFF -DBUILD_MISC_DOCS=OFF -DENABLE_CURL_MANUAL=OFF \
-              -DUSE_APPLE_IDN=OFF \
+              -DUSE_NGHTTP2=OFF -DUSE_LIBIDN2=OFF -DUSE_APPLE_IDN=OFF \
               ${options}
           fi
 

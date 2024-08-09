@@ -216,7 +216,7 @@ static const uint16_t default_ciphers[] = {
 #define SECTRANSP_PINNEDPUBKEY_V1 1
 #endif
 
-/* version 2 supports MacOSX 10.7+ */
+/* version 2 supports macOS 10.7+ */
 #if (!TARGET_OS_IPHONE && __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070)
 #define SECTRANSP_PINNEDPUBKEY_V2 1
 #endif
@@ -310,7 +310,8 @@ static OSStatus sectransp_bio_cf_out_write(SSLConnectionRef connection,
   OSStatus rtn = noErr;
 
   DEBUGASSERT(data);
-  nwritten = Curl_conn_cf_send(cf->next, data, buf, *dataLength, &result);
+  nwritten = Curl_conn_cf_send(cf->next, data, buf, *dataLength, FALSE,
+                               &result);
   CURL_TRC_CF(data, cf, "bio_send(len=%zu) -> %zd, result=%d",
               *dataLength, nwritten, result);
   if(nwritten <= 0) {
@@ -591,7 +592,7 @@ static OSStatus CopyIdentityFromPKCS12File(const char *cPath,
     cPassword, kCFStringEncodingUTF8) : NULL;
   CFDataRef pkcs_data = NULL;
 
-  /* We can import P12 files on iOS or OS X 10.7 or later: */
+  /* We can import P12 files on iOS or macOS 10.7 or later: */
   /* These constants are documented as having first appeared in 10.6 but they
      raise linker errors when used on that cat for some reason. */
 #if CURL_BUILD_MAC_10_7 || CURL_BUILD_IOS
@@ -927,7 +928,7 @@ static SSLCipherSuite * sectransp_get_supported_ciphers(SSLContextRef ssl_ctx,
     /* There is a known bug in early versions of Mountain Lion where ST's ECC
        ciphers (cipher suite 0xC001 through 0xC032) simply do not work.
        Work around the problem here by disabling those ciphers if we are
-       running in an affected version of OS X. */
+       running in an affected version of macOS. */
     if(maj == 12 && min <= 3) {
       size_t i = 0, j = 0;
       for(; i < *len; i++) {
@@ -2887,7 +2888,8 @@ const struct Curl_ssl Curl_ssl_sectransp = {
 #ifdef SECTRANSP_PINNEDPUBKEY
   SSLSUPP_PINNEDPUBKEY |
 #endif /* SECTRANSP_PINNEDPUBKEY */
-  SSLSUPP_HTTPS_PROXY,
+  SSLSUPP_HTTPS_PROXY |
+  SSLSUPP_CIPHER_LIST,
 
   sizeof(struct st_ssl_backend_data),
 

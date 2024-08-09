@@ -329,8 +329,8 @@ if ($ENV{"NGHTTPX"}) {
 my $disttests = "";
 sub get_disttests {
     # If a non-default $TESTDIR is being used there may not be any
-    # Makefile.inc in which case there's nothing to do.
-    open(my $dh, "<", "$TESTDIR/Makefile.inc") or return;
+    # Makefile.am in which case there's nothing to do.
+    open(my $dh, "<", "$TESTDIR/Makefile.am") or return;
     while(<$dh>) {
         chomp $_;
         if(($_ =~ /^#/) ||($_ !~ /test/)) {
@@ -535,7 +535,7 @@ sub checksystemfeatures {
             }
             if($curl =~ /win32|Windows|mingw(32|64)/) {
                 # This is a Windows MinGW build or native build, we need to use
-                # Win32-style path.
+                # Windows-style path.
                 $pwd = sys_native_current_path();
                 $has_textaware = 1;
                 $feature{"win32"} = 1;
@@ -592,6 +592,12 @@ sub checksystemfeatures {
             if ($libcurl =~ /nghttp2/i) {
                 # nghttp2 supports h2c, hyper does not
                 $feature{"h2c"} = 1;
+            }
+            if ($libcurl =~ /AppleIDN/) {
+                $feature{"AppleIDN"} = 1;
+            }
+            if ($libcurl =~ /WinIDN/) {
+                $feature{"WinIDN"} = 1;
             }
             if ($libcurl =~ /libssh2/i) {
                 $feature{"libssh2"} = 1;
@@ -682,7 +688,7 @@ sub checksystemfeatures {
                 # 'https-proxy' is used as "server" so consider it a protocol
                 push @protocols, 'https-proxy';
             }
-            # UNICODE support
+            # Unicode support
             $feature{"Unicode"} = $feat =~ /Unicode/i;
             # Thread-safe init
             $feature{"threadsafe"} = $feat =~ /threadsafe/i;
@@ -1034,7 +1040,7 @@ sub singletest_shouldrun {
     my @what;  # what features are needed
 
     if($disttests !~ /test$testnum(\W|\z)/ ) {
-        logmsg "Warning: test$testnum not present in tests/data/Makefile.inc\n";
+        logmsg "Warning: test$testnum not present in tests/data/Makefile.am\n";
     }
     if($disabled{$testnum}) {
         if(!$run_disabled) {
@@ -1245,7 +1251,7 @@ sub singletest_check {
         # get the mode attribute
         my $filemode=$hash{'mode'};
         if($filemode && ($filemode eq "text") && $has_textaware) {
-            # text mode when running on windows: fix line endings
+            # text mode when running on Windows: fix line endings
             s/\r\n/\n/g for @validstdout;
             s/\n/\r\n/g for @validstdout;
             s/\r\n/\n/g for @actual;
@@ -1305,7 +1311,7 @@ sub singletest_check {
             s/\r\n/\n/g for @validstderr;
         }
         if($filemode && ($filemode eq "text") && $has_textaware) {
-            # text mode when running on windows: fix line endings
+            # text mode when running on Windows: fix line endings
             s/\r\n/\n/g for @validstderr;
             s/\n/\r\n/g for @validstderr;
         }
@@ -1400,7 +1406,7 @@ sub singletest_check {
                 # get the mode attribute
                 my $filemode=$replycheckpartattr{'mode'};
                 if($filemode && ($filemode eq "text") && $has_textaware) {
-                    # text mode when running on windows: fix line endings
+                    # text mode when running on Windows: fix line endings
                     s/\r\n/\n/g for @replycheckpart;
                     s/\n/\r\n/g for @replycheckpart;
                 }
@@ -1430,7 +1436,7 @@ sub singletest_check {
         # get the mode attribute
         my $filemode=$replyattr{'mode'};
         if($filemode && ($filemode eq "text") && $has_textaware) {
-            # text mode when running on windows: fix line endings
+            # text mode when running on Windows: fix line endings
             s/\r\n/\n/g for @reply;
             s/\n/\r\n/g for @reply;
         }
@@ -1569,7 +1575,7 @@ sub singletest_check {
 
             my $filemode=$hash{'mode'};
             if($filemode && ($filemode eq "text") && $has_textaware) {
-                # text mode when running on windows: fix line endings
+                # text mode when running on Windows: fix line endings
                 s/\r\n/\n/g for @outfile;
                 s/\n/\r\n/g for @outfile;
             }
@@ -2615,6 +2621,10 @@ sub disabledtests {
                 exit 2;
             }
         }
+    }
+    else {
+        print STDERR "Cannot open $file, exiting\n";
+        exit 3;
     }
 }
 

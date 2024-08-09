@@ -819,6 +819,8 @@ CURLcode Curl_GetFTPResponse(struct Curl_easy *data,
   int cache_skip = 0;
   int value_to_be_ignored = 0;
 
+  CURL_TRC_FTP(data, "getFTPResponse start");
+
   if(ftpcode)
     *ftpcode = 0; /* 0 for errors */
   else
@@ -864,21 +866,27 @@ CURLcode Curl_GetFTPResponse(struct Curl_easy *data,
        */
     }
     else if(!Curl_conn_data_pending(data, FIRSTSOCKET)) {
-      switch(SOCKET_READABLE(sockfd, interval_ms)) {
-      case -1: /* select() error, stop reading */
+      curl_socket_t wsock = Curl_pp_needs_flush(data, pp)?
+                            sockfd : CURL_SOCKET_BAD;
+      int ev = Curl_socket_check(sockfd, CURL_SOCKET_BAD, wsock, interval_ms);
+      if(ev < 0) {
         failf(data, "FTP response aborted due to select/poll error: %d",
               SOCKERRNO);
         return CURLE_RECV_ERROR;
-
-      case 0: /* timeout */
+      }
+      else if(ev == 0) {
         if(Curl_pgrsUpdate(data))
           return CURLE_ABORTED_BY_CALLBACK;
         continue; /* just continue in our loop for the timeout duration */
-
-      default: /* for clarity */
-        break;
       }
     }
+
+    if(Curl_pp_needs_flush(data, pp)) {
+      result = Curl_pp_flushsend(data, pp);
+      if(result)
+        break;
+    }
+
     result = ftp_readresp(data, FIRSTSOCKET, pp, ftpcode, &nread);
     if(result)
       break;
@@ -897,6 +905,8 @@ CURLcode Curl_GetFTPResponse(struct Curl_easy *data,
   } /* while there is buffer left and loop is requested */
 
   pp->pending_resp = FALSE;
+  CURL_TRC_FTP(data, "getFTPResponse -> result=%d, nread=%zd, ftpcode=%d",
+               result, *nreadp, *ftpcode);
 
   return result;
 }
@@ -1042,7 +1052,7 @@ static CURLcode ftp_state_use_port(struct Curl_easy *data,
   int error;
   char *host = NULL;
   char *string_ftpport = data->set.str[STRING_FTPPORT];
-  struct Curl_dns_entry *h = NULL;
+  struct Curl_dns_entry *dns_entry = NULL;
   unsigned short port_min = 0;
   unsigned short port_max = 0;
   unsigned short port;
@@ -1178,15 +1188,12 @@ static CURLcode ftp_state_use_port(struct Curl_easy *data,
   }
 
   /* resolv ip/host to ip */
-  rc = Curl_resolv(data, host, 0, FALSE, &h);
+  rc = Curl_resolv(data, host, 0, FALSE, &dns_entry);
   if(rc == CURLRESOLV_PENDING)
-    (void)Curl_resolver_wait_resolv(data, &h);
-  if(h) {
-    res = h->addr;
-    /* when we return from this function, we can forget about this entry
-       to we can unlock it now already */
-    Curl_resolv_unlock(data, h);
-  } /* (h) */
+    (void)Curl_resolver_wait_resolv(data, &dns_entry);
+  if(dns_entry) {
+    res = dns_entry->addr;
+  }
   else
     res = NULL; /* failure! */
 
@@ -1381,6 +1388,9 @@ static CURLcode ftp_state_use_port(struct Curl_easy *data,
   ftp_state(data, FTP_PORT);
 
 out:
+  /* If we looked up a dns_entry, now is the time to safely release it */
+  if(dns_entry)
+    Curl_resolv_unlink(data, &dns_entry);
   if(result) {
     ftp_state(data, FTP_STOP);
   }
@@ -2098,7 +2108,7 @@ static CURLcode ftp_state_pasv_resp(struct Curl_easy *data,
                            CURL_CF_SSL_ENABLE : CURL_CF_SSL_DISABLE);
 
   if(result) {
-    Curl_resolv_unlock(data, addr); /* we are done using this address */
+    Curl_resolv_unlink(data, &addr); /* we are done using this address */
     if(ftpc->count1 == 0 && ftpcode == 229)
       return ftp_epsv_disable(data, conn);
 
@@ -2116,7 +2126,7 @@ static CURLcode ftp_state_pasv_resp(struct Curl_easy *data,
     /* this just dumps information about this second connection */
     ftp_pasv_verbose(data, addr->addr, ftpc->newhost, connectport);
 
-  Curl_resolv_unlock(data, addr); /* we are done using this address */
+  Curl_resolv_unlink(data, &addr); /* we are done using this address */
 
   Curl_safefree(conn->secondaryhostname);
   conn->secondary_port = ftpc->newport;

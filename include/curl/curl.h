@@ -76,7 +76,7 @@
 #if defined(_WIN32) && !defined(_WIN32_WCE) && !defined(__CYGWIN__)
 #if !(defined(_WINSOCKAPI_) || defined(_WINSOCK_H) || \
       defined(__LWIP_OPT_H__) || defined(LWIP_HDR_OPT_H))
-/* The check above prevents the winsock2 inclusion if winsock.h already was
+/* The check above prevents the winsock2.h inclusion if winsock.h already was
    included, since they cannot co-exist without problems */
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -2133,7 +2133,7 @@ typedef enum {
 
   /* the EC curves requested by the TLS client (RFC 8422, 5.1);
    * OpenSSL support via 'set_groups'/'set_curves':
-   * https://www.openssl.org/docs/manmaster/man3/SSL_CTX_set1_groups.html
+   * https://docs.openssl.org/master/man3/SSL_CTX_set1_curves/
    */
   CURLOPT(CURLOPT_SSL_EC_CURVES, CURLOPTTYPE_STRINGPOINT, 298),
 

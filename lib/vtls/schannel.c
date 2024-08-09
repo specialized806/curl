@@ -1083,7 +1083,7 @@ schannel_connect_step1(struct Curl_cfilter *cf, struct Curl_easy *data)
 
 #ifdef HAS_ALPN
   /* ALPN is only supported on Windows 8.1 / Server 2012 R2 and above.
-     Also it does not seem to be supported for Wine, see curl bug #983. */
+     Also it does not seem to be supported for WINE, see curl bug #983. */
   backend->use_alpn = connssl->alpn &&
     !GetProcAddress(GetModuleHandle(TEXT("ntdll")),
                     "wine_get_version") &&
@@ -1099,7 +1099,7 @@ schannel_connect_step1(struct Curl_cfilter *cf, struct Curl_easy *data)
    * do it following a more manual process. */
   backend->use_manual_cred_validation = true;
 #else
-#error "compiler too old to support requisite manual cert verify for Win CE"
+#error "compiler too old to support Windows CE requisite manual cert verify"
 #endif
 #else
 #ifdef HAS_MANUAL_VERIFY_API
@@ -1242,7 +1242,7 @@ schannel_connect_step1(struct Curl_cfilter *cf, struct Curl_easy *data)
      https://msdn.microsoft.com/en-us/library/windows/desktop/aa375924.aspx
 
      At the moment we do not pass inbuf unless we are using ALPN since we only
-     use it for that, and Wine (for which we currently disable ALPN) is giving
+     use it for that, and WINE (for which we currently disable ALPN) is giving
      us problems with inbuf regardless. https://github.com/curl/curl/issues/983
   */
   sspi_status = s_pSecFn->InitializeSecurityContext(
@@ -1287,7 +1287,7 @@ schannel_connect_step1(struct Curl_cfilter *cf, struct Curl_easy *data)
 
   /* send initial handshake data which is now stored in output buffer */
   written = Curl_conn_cf_send(cf->next, data,
-                              outbuf.pvBuffer, outbuf.cbBuffer,
+                              outbuf.pvBuffer, outbuf.cbBuffer, FALSE,
                               &result);
   s_pSecFn->FreeContextBuffer(outbuf.pvBuffer);
   if((result != CURLE_OK) || (outbuf.cbBuffer != (size_t) written)) {
@@ -1477,7 +1477,7 @@ schannel_connect_step2(struct Curl_cfilter *cf, struct Curl_easy *data)
           /* send handshake token to server */
           written = Curl_conn_cf_send(cf->next, data,
                                       outbuf[i].pvBuffer, outbuf[i].cbBuffer,
-                                      &result);
+                                      FALSE, &result);
           if((result != CURLE_OK) ||
              (outbuf[i].cbBuffer != (size_t) written)) {
             failf(data, "schannel: failed to send next handshake data: "
@@ -2054,7 +2054,7 @@ schannel_send(struct Curl_cfilter *cf, struct Curl_easy *data,
 
        this_write = Curl_conn_cf_send(cf->next, data,
                                       ptr + written, len - written,
-                                      &result);
+                                      FALSE, &result);
       if(result == CURLE_AGAIN)
         continue;
       else if(result != CURLE_OK) {
@@ -2531,7 +2531,7 @@ static CURLcode schannel_shutdown(struct Curl_cfilter *cf,
       /* send close message which is in output buffer */
       ssize_t written = Curl_conn_cf_send(cf->next, data,
                                           outbuf.pvBuffer, outbuf.cbBuffer,
-                                          &result);
+                                          FALSE, &result);
       s_pSecFn->FreeContextBuffer(outbuf.pvBuffer);
       if(!result) {
         if(written < (ssize_t)outbuf.cbBuffer) {
@@ -2969,7 +2969,8 @@ const struct Curl_ssl Curl_ssl_schannel = {
 #endif
   SSLSUPP_TLS13_CIPHERSUITES |
   SSLSUPP_CA_CACHE |
-  SSLSUPP_HTTPS_PROXY,
+  SSLSUPP_HTTPS_PROXY |
+  SSLSUPP_CIPHER_LIST,
 
   sizeof(struct schannel_ssl_backend_data),
 

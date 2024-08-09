@@ -302,6 +302,7 @@ struct OperationConfig {
   struct State state;             /* for create_transfer() */
   bool rm_partial;                /* on error, remove partially written output
                                      files */
+  bool skip_existing;
 #ifdef USE_ECH
   char *ech;                      /* Config set by --ech keywords */
   char *ech_config;               /* Config set by "--ech esl:" option */
@@ -315,6 +316,7 @@ struct GlobalConfig {
   bool silent;                    /* do not show messages, --silent given */
   bool noprogress;                /* do not show progress bar */
   bool isatty;                    /* Updated internally if output is a tty */
+  unsigned char verbosity;        /* How verbose we should be */
   char *trace_dump;               /* file to dump the network trace to */
   FILE *trace_stream;
   bool trace_fopened;

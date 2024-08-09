@@ -572,7 +572,7 @@ static CURLcode smb_send(struct Curl_easy *data, size_t len,
   size_t bytes_written;
   CURLcode result;
 
-  result = Curl_xfer_send(data, smbc->send_buf, len, &bytes_written);
+  result = Curl_xfer_send(data, smbc->send_buf, len, FALSE, &bytes_written);
   if(result)
     return result;
 
@@ -597,7 +597,7 @@ static CURLcode smb_flush(struct Curl_easy *data)
   if(!smbc->send_size)
     return CURLE_OK;
 
-  result = Curl_xfer_send(data, smbc->send_buf + smbc->sent, len,
+  result = Curl_xfer_send(data, smbc->send_buf + smbc->sent, len, FALSE,
                           &bytes_written);
   if(result)
     return result;
@@ -924,7 +924,7 @@ static CURLcode smb_connection_state(struct Curl_easy *data, bool *done)
 
 /*
  * Convert a timestamp from the Windows world (100 nsec units from 1 Jan 1601)
- * to Posix time. Cap the output to fit within a time_t.
+ * to POSIX time. Cap the output to fit within a time_t.
  */
 static void get_posix_time(time_t *out, curl_off_t timestamp)
 {

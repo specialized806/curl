@@ -200,7 +200,8 @@ static int mbedtls_bio_cf_write(void *bio,
   if(!data)
     return 0;
 
-  nwritten = Curl_conn_cf_send(cf->next, data, (char *)buf, blen, &result);
+  nwritten = Curl_conn_cf_send(cf->next, data, (char *)buf, blen, FALSE,
+                               &result);
   CURL_TRC_CF(data, cf, "mbedtls_bio_cf_out_write(len=%zu) -> %zd, err=%d",
               blen, nwritten, result);
   if(nwritten < 0 && CURLE_AGAIN == result) {
@@ -249,8 +250,8 @@ static const mbedtls_x509_crt_profile mbedtls_x509_crt_profile_fr =
   1024,      /* RSA min key len */
 };
 
-/* See https://tls.mbed.org/discussions/generic/
-   howto-determine-exact-buffer-len-for-mbedtls_pk_write_pubkey_der
+/* See https://web.archive.org/web/20200921194007/tls.mbed.org/discussions/
+   generic/howto-determine-exact-buffer-len-for-mbedtls_pk_write_pubkey_der
 */
 #define RSA_PUB_DER_MAX_BYTES   (38 + 2 * MBEDTLS_MPI_MAX_SIZE)
 #define ECP_PUB_DER_MAX_BYTES   (30 + 2 * MBEDTLS_ECP_MAX_BYTES)
@@ -428,11 +429,13 @@ mbed_cipher_suite_walk_str(const char **str, const char **end)
 static CURLcode
 mbed_set_selected_ciphers(struct Curl_easy *data,
                           struct mbed_ssl_backend_data *backend,
-                          const char *ciphers)
+                          const char *ciphers12,
+                          const char *ciphers13)
 {
+  const char *ciphers = ciphers12;
   const int *supported;
   int *selected;
-  size_t supported_len, count = 0, i;
+  size_t supported_len, count = 0, default13_count = 0, i, j;
   const char *ptr, *end;
 
   supported = mbedtls_ssl_list_ciphersuites();
@@ -443,6 +446,26 @@ mbed_set_selected_ciphers(struct Curl_easy *data,
   if(!selected)
     return CURLE_OUT_OF_MEMORY;
 
+#ifndef TLS13_SUPPORT
+  (void) ciphers13, (void) j;
+#else
+  if(!ciphers13) {
+    /* Add default TLSv1.3 ciphers to selection */
+    for(j = 0; j < supported_len; j++) {
+      uint16_t id = (uint16_t) supported[j];
+      if(strncmp(mbedtls_ssl_get_ciphersuite_name(id), "TLS1-3", 6) != 0)
+        continue;
+
+      selected[count++] = id;
+    }
+
+    default13_count = count;
+  }
+  else
+    ciphers = ciphers13;
+
+add_ciphers:
+#endif
   for(ptr = ciphers; ptr[0] != '\0' && count < supported_len; ptr = end) {
     uint16_t id = mbed_cipher_suite_walk_str(&ptr, &end);
 
@@ -462,13 +485,37 @@ mbed_set_selected_ciphers(struct Curl_easy *data,
     /* No duplicates allowed (so selected cannot overflow) */
     for(i = 0; i < count && selected[i] != id; i++);
     if(i < count) {
-      infof(data, "mbedTLS: duplicate cipher in list: \"%.*s\"",
-            (int) (end - ptr), ptr);
+      if(i >= default13_count)
+        infof(data, "mbedTLS: duplicate cipher in list: \"%.*s\"",
+              (int) (end - ptr), ptr);
       continue;
     }
 
     selected[count++] = id;
   }
+
+#ifdef TLS13_SUPPORT
+  if(ciphers == ciphers13 && ciphers12) {
+    ciphers = ciphers12;
+    goto add_ciphers;
+  }
+
+  if(!ciphers12) {
+    /* Add default TLSv1.2 ciphers to selection */
+    for(j = 0; j < supported_len; j++) {
+      uint16_t id = (uint16_t) supported[j];
+      if(strncmp(mbedtls_ssl_get_ciphersuite_name(id), "TLS1-3", 6) == 0)
+        continue;
+
+      /* No duplicates allowed (so selected cannot overflow) */
+      for(i = 0; i < count && selected[i] != id; i++);
+      if(i < count)
+        continue;
+
+      selected[count++] = id;
+    }
+  }
+#endif
 
   selected[count] = 0;
 
@@ -813,9 +860,17 @@ mbed_connect_step1(struct Curl_cfilter *cf, struct Curl_easy *data)
                       mbedtls_bio_cf_read,
                       NULL /*  rev_timeout() */);
 
+#ifndef TLS13_SUPPORT
   if(conn_config->cipher_list) {
     CURLcode result = mbed_set_selected_ciphers(data, backend,
-                                                conn_config->cipher_list);
+                                                conn_config->cipher_list,
+                                                NULL);
+#else
+  if(conn_config->cipher_list || conn_config->cipher_list13) {
+    CURLcode result = mbed_set_selected_ciphers(data, backend,
+                                                conn_config->cipher_list,
+                                                conn_config->cipher_list13);
+#endif
     if(result != CURLE_OK) {
       failf(data, "mbedTLS: failed to set cipher suites");
       return result;
@@ -1668,7 +1723,11 @@ const struct Curl_ssl Curl_ssl_mbedtls = {
   SSLSUPP_CERTINFO |
   SSLSUPP_PINNEDPUBKEY |
   SSLSUPP_SSL_CTX |
-  SSLSUPP_HTTPS_PROXY,
+#ifdef TLS13_SUPPORT
+  SSLSUPP_TLS13_CIPHERSUITES |
+#endif
+  SSLSUPP_HTTPS_PROXY |
+  SSLSUPP_CIPHER_LIST,
 
   sizeof(struct mbed_ssl_backend_data),
 

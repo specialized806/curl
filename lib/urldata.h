@@ -159,6 +159,7 @@ typedef ssize_t (Curl_send)(struct Curl_easy *data,   /* transfer */
                             int sockindex,            /* socketindex */
                             const void *buf,          /* data to write */
                             size_t len,               /* max amount to write */
+                            bool eos,                 /* last chunk */
                             CURLcode *err);           /* error to return */
 
 /* return the count of bytes read, or -1 on error */
@@ -272,11 +273,11 @@ struct ssl_peer {
   char *sni;             /* SNI version of hostname or NULL if not usable */
   ssl_peer_type type;    /* type of the peer information */
   int port;              /* port we are talking to */
-  int transport;         /* TCP or QUIC */
+  int transport;         /* one of TRNSPRT_* defines */
 };
 
 struct ssl_primary_config {
-  char *CApath;          /* certificate dir (does not work on windows) */
+  char *CApath;          /* certificate dir (does not work on Windows) */
   char *CAfile;          /* certificate to verify peer against */
   char *issuercert;      /* optional issuer certificate filename */
   char *clientcert;
@@ -441,7 +442,7 @@ struct ntlmdata {
   unsigned int flags;
   unsigned char nonce[8];
   unsigned int target_info_len;
-  void *target_info; /* TargetInfo received in the ntlm type-2 message */
+  void *target_info; /* TargetInfo received in the NTLM type-2 message */
 #endif
 };
 #endif
@@ -831,7 +832,8 @@ struct connectdata {
   struct proxy_info http_proxy;
 #endif
   /* 'primary' and 'secondary' get filled with IP quadruple
-     (local/remote numerical ip address and port) whenever a is *attempted*.
+     (local/remote numerical ip address and port) whenever a connect is
+     *attempted*.
      When more than one address is tried for a connection these will hold data
      for the last attempt. When the connection is actually established
      these are updated with data which comes directly from the socket. */
@@ -1058,14 +1060,23 @@ struct PureInfo {
   BIT(used_proxy); /* the transfer used a proxy */
 };
 
+struct pgrs_measure {
+  struct curltime start; /* when measure started */
+  curl_off_t start_size; /* the 'cur_size' the measure started at */
+};
+
+struct pgrs_dir {
+  curl_off_t total_size; /* total expected bytes */
+  curl_off_t cur_size; /* transferred bytes so far */
+  curl_off_t speed; /* bytes per second transferred */
+  struct pgrs_measure limit;
+};
 
 struct Progress {
   time_t lastshow; /* time() of the last displayed progress meter or NULL to
                       force redraw at next call */
-  curl_off_t size_dl; /* total expected size */
-  curl_off_t size_ul; /* total expected size */
-  curl_off_t downloaded; /* transferred so far */
-  curl_off_t uploaded; /* transferred so far */
+  struct pgrs_dir ul;
+  struct pgrs_dir dl;
 
   curl_off_t current_speed; /* uses the currently fastest transfer */
 
@@ -1073,9 +1084,6 @@ struct Progress {
   int flags; /* see progress.h */
 
   timediff_t timespent;
-
-  curl_off_t dlspeed;
-  curl_off_t ulspeed;
 
   timediff_t t_postqueue;
   timediff_t t_nslookup;
@@ -1089,14 +1097,6 @@ struct Progress {
   struct curltime t_startsingle;
   struct curltime t_startop;
   struct curltime t_acceptdata;
-
-
-  /* upload speed limit */
-  struct curltime ul_limit_start;
-  curl_off_t ul_limit_size;
-  /* download speed limit */
-  struct curltime dl_limit_start;
-  curl_off_t dl_limit_size;
 
 #define CURR_TIME (5 + 1) /* 6 entries for 5 seconds */
 
@@ -1422,7 +1422,7 @@ enum dupstring {
   STRING_KEY,             /* private key filename */
   STRING_KEY_PASSWD,      /* plain text private key password */
   STRING_KEY_TYPE,        /* format for private key (default: PEM) */
-  STRING_SSL_CAPATH,      /* CA directory name (does not work on windows) */
+  STRING_SSL_CAPATH,      /* CA directory name (does not work on Windows) */
   STRING_SSL_CAFILE,      /* certificate file to verify peer against */
   STRING_SSL_PINNEDPUBLICKEY, /* public key file to verify peer against */
   STRING_SSL_CIPHER_LIST, /* list of ciphers to use */
@@ -1436,7 +1436,7 @@ enum dupstring {
   STRING_KEY_PROXY,       /* private key filename */
   STRING_KEY_PASSWD_PROXY, /* plain text private key password */
   STRING_KEY_TYPE_PROXY,  /* format for private key (default: PEM) */
-  STRING_SSL_CAPATH_PROXY, /* CA directory name (does not work on windows) */
+  STRING_SSL_CAPATH_PROXY, /* CA directory name (does not work on Windows) */
   STRING_SSL_CAFILE_PROXY, /* certificate file to verify peer against */
   STRING_SSL_PINNEDPUBLICKEY_PROXY, /* public key file to verify proxy */
   STRING_SSL_CIPHER_LIST_PROXY, /* list of ciphers to use */
