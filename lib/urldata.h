@@ -568,7 +568,9 @@ struct hostname {
 struct Curl_async {
   char *hostname;
   struct Curl_dns_entry *dns;
-  struct thread_data *tdata;
+#ifdef CURLRES_ASYNCH
+  struct thread_data thdata;
+#endif
   void *resolver; /* resolver state, if it is used in the URL state -
                      ares_channel e.g. */
   int port;
@@ -1108,7 +1110,6 @@ struct Curl_data_prio_node {
 /**
  * Priority information for an easy handle in relation to others
  * on the same connection.
- * TODO: we need to adapt it to the new priority scheme as defined in RFC 9218
  */
 struct Curl_data_priority {
 #ifdef USE_NGHTTP2
@@ -1199,7 +1200,6 @@ struct UrlState {
   curl_prot_t first_remote_protocol;
 
   int retrycount; /* number of retries on a new connection */
-  struct Curl_ssl_scache *ssl_scache; /* TLS session pool */
   int os_errno;  /* filled in with errno whenever an error occurs */
   long followlocation; /* redirect counter */
   int requests; /* request counter: redirects + authentication retakes */

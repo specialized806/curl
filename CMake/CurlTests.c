@@ -70,7 +70,7 @@ int main(void)
 #include <netdb.h>
 int main(void)
 {
-  char *address = "example.com";
+  const char *address = "example.com";
   int length = 0;
   int type = 0;
   struct hostent h;
@@ -102,21 +102,6 @@ int main(void)
   (void)length;
   (void)type;
   (void)rc;
-  return 0;
-}
-#endif
-
-#ifdef HAVE_IN_ADDR_T
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-int main(void)
-{
-  if((in_addr_t *) 0)
-    return 0;
-  if(sizeof(in_addr_t))
-    return 0;
-  ;
   return 0;
 }
 #endif
@@ -167,7 +152,7 @@ int main(void) { return 0; }
 int main(void)
 {
   /* ioctlsocket source code */
-  int socket;
+  int socket = -1;
   unsigned long flags = ioctlsocket(socket, FIONBIO, &flags);
   ;
   return 0;
