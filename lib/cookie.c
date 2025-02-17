@@ -76,11 +76,9 @@ Example set of cookies:
 #include "urldata.h"
 #include "cookie.h"
 #include "psl.h"
-#include "strtok.h"
 #include "sendf.h"
 #include "slist.h"
 #include "share.h"
-#include "strtoofft.h"
 #include "strcase.h"
 #include "curl_get_line.h"
 #include "curl_memrchr.h"
@@ -89,6 +87,7 @@ Example set of cookies:
 #include "fopen.h"
 #include "strdup.h"
 #include "llist.h"
+#include "strparse.h"
 
 /* The last 3 #include files should be in this order */
 #include "curl_printf.h"
@@ -519,7 +518,7 @@ parse_cookie_header(struct Curl_easy *data,
     size_t vlen;
     size_t nlen;
 
-    while(*ptr && ISBLANK(*ptr))
+    while(ISBLANK(*ptr))
       ptr++;
 
     /* we have a <name>=<value> pair or a stand-alone word here */
@@ -537,7 +536,12 @@ parse_cookie_header(struct Curl_easy *data,
         nlen--;
 
       if(*ptr == '=') {
-        vlen = strcspn(++ptr, ";\r\n");
+        ptr++;
+        /* Skip spaces and tabs before the value */
+        while(ISBLANK(*ptr))
+          ptr++;
+
+        vlen = strcspn(ptr, ";\r\n");
         valuep = ptr;
         sep = TRUE;
         ptr = &valuep[vlen];
@@ -545,12 +549,6 @@ parse_cookie_header(struct Curl_easy *data,
         /* Strip off trailing whitespace from the value */
         while(vlen && ISBLANK(valuep[vlen-1]))
           vlen--;
-
-        /* Skip leading whitespace from the value */
-        while(vlen && ISBLANK(*valuep)) {
-          valuep++;
-          vlen--;
-        }
 
         /* Reject cookies with a TAB inside the value */
         if(memchr(valuep, '\t', vlen)) {
@@ -708,21 +706,22 @@ parse_cookie_header(struct Curl_easy *data,
          * client should discard the cookie. A value of zero means the
          * cookie should be discarded immediately.
          */
-        CURLofft offt;
+        int rc;
         const char *maxage = valuep;
-        offt = curlx_strtoofft((*maxage == '\"') ?
-                               &maxage[1] : &maxage[0], NULL, 10,
-                               &co->expires);
-        switch(offt) {
-        case CURL_OFFT_FLOW:
+        if(*maxage == '\"')
+          maxage++;
+        rc = Curl_str_number(&maxage, &co->expires, CURL_OFF_T_MAX);
+
+        switch(rc) {
+        case STRE_OVERFLOW:
           /* overflow, used max value */
           co->expires = CURL_OFF_T_MAX;
           break;
-        case CURL_OFFT_INVAL:
+        default:
           /* negative or otherwise bad, expire */
           co->expires = 1;
           break;
-        case CURL_OFFT_OK:
+        case STRE_OK:
           if(!co->expires)
             /* already expired */
             co->expires = 1;
@@ -769,7 +768,7 @@ parse_cookie_header(struct Curl_easy *data,
       /* this is an "illegal" <what>=<this> pair */
     }
 
-    while(*ptr && ISBLANK(*ptr))
+    while(ISBLANK(*ptr))
       ptr++;
     if(*ptr == ';')
       ptr++;
@@ -915,16 +914,8 @@ parse_netscape(struct Cookie *co,
       }
       break;
     case 4:
-      {
-        char *endp;
-        const char *p;
-        /* make sure curlx_strtoofft won't read past the current field */
-        for(p = ptr; p < &ptr[len] && ISDIGIT(*p); ++p)
-          ;
-        if(p == ptr || p != &ptr[len] ||
-           curlx_strtoofft(ptr, &endp, 10, &co->expires) || endp != &ptr[len])
-          return CERR_RANGE;
-      }
+      if(Curl_str_number(&ptr, &co->expires, CURL_OFF_T_MAX))
+        return CERR_RANGE;
       break;
     case 5:
       co->name = Curl_memdup0(ptr, len);
@@ -1291,7 +1282,7 @@ struct CookieInfo *Curl_cookie_init(struct Curl_easy *data,
           /* This is a cookie line, get it! */
           lineptr += 11;
           headerline = TRUE;
-          while(*lineptr && ISBLANK(*lineptr))
+          while(ISBLANK(*lineptr))
             lineptr++;
         }
 
