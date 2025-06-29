@@ -27,9 +27,7 @@
  * curl_m*printf formatting capabilities and handling of some data types.
  */
 
-#include "test.h"
-
-#include <limits.h>
+#include "first.h"
 
 #ifdef HAVE_LOCALE_H
 #  include <locale.h> /* for setlocale() */
@@ -148,8 +146,8 @@ static int test_unsigned_short_formatting(void)
     (void)curl_msprintf(us_test[i].result, "%hu", us_test[i].num);
 
     if(memcmp(us_test[i].result,
-               us_test[i].expected,
-               strlen(us_test[i].expected))) {
+              us_test[i].expected,
+              strlen(us_test[i].expected))) {
       curl_mprintf("unsigned short test #%.2d: Failed "
                    "(Expected: %s Got: %s)\n",
                    i, us_test[i].expected, us_test[i].result);
@@ -226,7 +224,7 @@ static int test_signed_short_formatting(void)
               ss_test[i].expected,
               strlen(ss_test[i].expected))) {
       curl_mprintf("signed short test #%.2d: Failed (Expected: %s Got: %s)\n",
-             i, ss_test[i].expected, ss_test[i].result);
+                   i, ss_test[i].expected, ss_test[i].result);
       failed++;
     }
 
@@ -373,10 +371,10 @@ static int test_unsigned_int_formatting(void)
     (void)curl_msprintf(ui_test[i].result, "%u", ui_test[i].num);
 
     if(memcmp(ui_test[i].result,
-               ui_test[i].expected,
-               strlen(ui_test[i].expected))) {
+              ui_test[i].expected,
+              strlen(ui_test[i].expected))) {
       curl_mprintf("unsigned int test #%.2d: Failed (Expected: %s Got: %s)\n",
-             i, ui_test[i].expected, ui_test[i].result);
+                   i, ui_test[i].expected, ui_test[i].result);
       failed++;
     }
 
@@ -604,7 +602,7 @@ static int test_signed_int_formatting(void)
               si_test[i].expected,
               strlen(si_test[i].expected))) {
       curl_mprintf("signed int test #%.2d: Failed (Expected: %s Got: %s)\n",
-             i, si_test[i].expected, si_test[i].result);
+                   i, si_test[i].expected, si_test[i].result);
       failed++;
     }
 
@@ -750,10 +748,10 @@ static int test_unsigned_long_formatting(void)
     (void)curl_msprintf(ul_test[i].result, "%lu", ul_test[i].num);
 
     if(memcmp(ul_test[i].result,
-               ul_test[i].expected,
-               strlen(ul_test[i].expected))) {
+              ul_test[i].expected,
+              strlen(ul_test[i].expected))) {
       curl_mprintf("unsigned long test #%.2d: Failed (Expected: %s Got: %s)\n",
-             i, ul_test[i].expected, ul_test[i].result);
+                   i, ul_test[i].expected, ul_test[i].result);
       failed++;
     }
 
@@ -981,7 +979,7 @@ static int test_signed_long_formatting(void)
               sl_test[i].expected,
               strlen(sl_test[i].expected))) {
       curl_mprintf("signed long test #%.2d: Failed (Expected: %s Got: %s)\n",
-             i, sl_test[i].expected, sl_test[i].result);
+                   i, sl_test[i].expected, sl_test[i].result);
       failed++;
     }
 
@@ -1096,7 +1094,7 @@ static int test_curl_off_t_formatting(void)
               co_test[i].expected,
               strlen(co_test[i].expected))) {
       curl_mprintf("curl_off_t test #%.2d: Failed (Expected: %s Got: %s)\n",
-             i, co_test[i].expected, co_test[i].result);
+                   i, co_test[i].expected, co_test[i].result);
       failed++;
     }
 
@@ -1115,7 +1113,7 @@ static int _string_check(int linenumber, char *buf, const char *buf2)
   if(strcmp(buf, buf2)) {
     /* they shouldn't differ */
     curl_mprintf("sprintf line %d failed:\nwe      '%s'\nsystem: '%s'\n",
-           linenumber, buf, buf2);
+                 linenumber, buf, buf2);
     return 1;
   }
   return 0;
@@ -1128,7 +1126,7 @@ static int _strlen_check(int linenumber, char *buf, size_t len)
   if(len != buflen) {
     /* they shouldn't differ */
     curl_mprintf("sprintf strlen:%d failed:\nwe '%zu'\nsystem: '%zu'\n",
-           linenumber, buflen, len);
+                 linenumber, buflen, len);
     return 1;
   }
   return 0;
@@ -1541,7 +1539,7 @@ static int test_return_codes(void)
   return 0;
 }
 
-CURLcode test(char *URL)
+static CURLcode test_lib557(char *URL)
 {
   int errors = 0;
   (void)URL; /* not used */
@@ -1555,29 +1553,17 @@ CURLcode test(char *URL)
 #endif
 
   errors += test_pos_arguments();
-
   errors += test_weird_arguments();
-
   errors += test_unsigned_short_formatting();
-
   errors += test_signed_short_formatting();
-
   errors += test_unsigned_int_formatting();
-
   errors += test_signed_int_formatting();
-
   errors += test_unsigned_long_formatting();
-
   errors += test_signed_long_formatting();
-
   errors += test_curl_off_t_formatting();
-
   errors += test_string_formatting();
-
   errors += test_float_formatting();
-
   errors += test_oct_hex_formatting();
-
   errors += test_return_codes();
 
   if(errors)
